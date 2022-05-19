@@ -14,22 +14,42 @@ void VMinitialize() {
 
 
 int VMread(uint64_t virtualAddress, word_t* value) {
-    word_t address = 0; //virtualAddress >> (VIRTUAL_ADDRESS_WIDTH - OFFSET_WIDTH);
+    word_t old_address = 0;
+    word_t new_address;
     unsigned int curBits;
     for (int i = 0; i < TABLES_DEPTH; ++i) {
         curBits = VIRTUAL_ADDRESS_WIDTH - ( (i + 1) * OFFSET_WIDTH);
-        PMread((address * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), &address);
+        PMread((old_address * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), &new_address);
+        old_address = new_address;
+        // @todo in theory, two addresses can be unified into the same variable?
     }
+    PMread((new_address * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
+
     return 0;
 }
 
 
 int VMwrite(uint64_t virtualAddress, word_t value) {
+    word_t old_address = 0;
+    word_t new_address;
+    unsigned int curBits;
+    for (int i = 0; i < TABLES_DEPTH; ++i) {
+        curBits = VIRTUAL_ADDRESS_WIDTH - ( (i + 1) * OFFSET_WIDTH);
+        PMread((old_address * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), &new_address);
+        old_address = new_address;
+        // @todo in theory, two addresses can be unified into the same variable?
+    }
+
+    PMwrite((new_address * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
     return 0;
 }
 
+/*
 int main() {
-    uint64_t num = std::rand();
-    std::cout << num << std::endl << RIGHTMOST_BITS(num) << std::endl;
+    VMinitialize();
+    VMwrite(49, 67);
+    word_t holder;
+    VMread(49, &holder);
+    printf("%d\n", holder);
     return 0;
-}
+}*/
