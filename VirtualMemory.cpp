@@ -1,5 +1,4 @@
-#include <cstdlib>
-#include <iostream>
+#include <cstdio>
 #include "VirtualMemory.h"
 #include "PhysicalMemory.h"
 
@@ -44,12 +43,11 @@ int VMwrite(uint64_t virtualAddress, word_t value) {
     return 0;
 }
 
-/*
 int main() {
     VMinitialize();
-    VMwrite(49, 67);
+    VMwrite(37293038928, 67);
     word_t holder;
-    VMread(49, &holder);
+    VMread(37293038928, &holder);
     printf("%d\n", holder);
     return 0;
-}*/
+}
