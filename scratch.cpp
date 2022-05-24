@@ -7,10 +7,14 @@
 
 #define RIGHTMOST_BITS(num) (num & (PAGE_SIZE - 1))
 
+void add_one(word_t *ptr) {
+    (*ptr)++;
+}
+
 int main() {
-    time_t t;
-    srand((unsigned) time(&t));
-    uint64_t num = rand();
-    std::cout << num << std::endl << RIGHTMOST_BITS(num) << std::endl;
+    word_t num = 4;
+    std::cout << num << std::endl;
+    add_one(&num);
+    std::cout << num << std::endl;
     return 0;
 }

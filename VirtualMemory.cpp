@@ -5,8 +5,8 @@
 #define RIGHTMOST_BITS(num) (num & (PAGE_SIZE - 1))
 
 
-word_t findEmptyFrameBelow(word_t frame, int depth, word_t exclude);
-word_t findEmptyFrame(word_t exclude);
+word_t findEmptyFrameBelow(word_t frame, int depth, word_t exclude, word_t *max_frame_index);
+word_t findEmptyFrame(word_t exclude, word_t *max_frame_index);
 
 void VMinitialize() {
     for (int i = 0; i < PAGE_SIZE; ++i) {
@@ -23,10 +23,17 @@ int VMread(uint64_t virtualAddress, word_t* value) {
         curBits = VIRTUAL_ADDRESS_WIDTH - ( (i + 1) * OFFSET_WIDTH);
         PMread((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), &child_frame);
 
+        // page is not in physical memory, check for empty frames
+        word_t max_frame_index;
         if (child_frame == 0) {
-            child_frame = findEmptyFrame(parent_frame);
+            child_frame = findEmptyFrame(parent_frame, &max_frame_index);
         }
-        if (child_frame < 0) {
+        // no empty frames available, try using unused frame
+        if (child_frame == 0 && max_frame_index + 1 < NUM_FRAMES) {
+            child_frame = max_frame_index + 1;
+        }
+
+        if (child_frame == 0) {
             // TODO continue here
         }
 
@@ -38,32 +45,34 @@ int VMread(uint64_t virtualAddress, word_t* value) {
     return 0;
 }
 
-word_t findEmptyFrameBelow(word_t frame, int depth, word_t exclude) {
+word_t findEmptyFrameBelow(word_t frame, int depth, word_t exclude, word_t *max_frame_index) {
 
     if (depth == TABLES_DEPTH || frame == exclude) {
-        return -1;
+        return 0;
     }
 
     word_t holder1 = 0;
+
     for (int i = 0; i < PAGE_SIZE; ++i) {
         word_t holder2;
         PMread((frame * PAGE_SIZE) + i, &holder2);
-        if (holder2 != 0) {
-            word_t emptyFrame = findEmptyFrameBelow(holder2, depth + 1, 0);
+        if (holder2 > 0) {
+            if (holder2 > *max_frame_index) {*max_frame_index = holder2;}
+            word_t emptyFrame = findEmptyFrameBelow(holder2, depth + 1, exclude, max_frame_index);
             if (emptyFrame > 0) {
                 return emptyFrame;
             }
         holder1 += holder2;
         }
     }
-    if (holder1 != 0) {
-        return -1;
+    if (holder1 > 0) {
+        return 0;
     }
     return frame;
 }
 
-word_t findEmptyFrame(word_t exclude) {
-    return findEmptyFrameBelow(0, 0, exclude);
+word_t findEmptyFrame(word_t exclude, word_t *max_frame_index) {
+    return findEmptyFrameBelow(0, 0, exclude, max_frame_index);
 }
 
 
