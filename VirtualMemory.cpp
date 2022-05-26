@@ -4,9 +4,19 @@
 
 #define RIGHTMOST_BITS(num) (num & (PAGE_SIZE - 1))
 
+struct DFSinfo {
+    word_t exclude; // frame not to be considered empty even if it has only 0s
+    uint64_t page_to_create;
+    word_t *empty_frame;
+    word_t *max_frame_index; //
+    uint64_t *pageToEvict; // VM page in PM with greatest cyclical difference from page_to_create
+    uint64_t *frameToEvictFrom;
+    uint64_t *locOfEvictFrame;
+} typedef DFSinfo;
 
-word_t findEmptyFrameBelow(word_t frame, uint64_t parent, word_t exclude, word_t *max_frame_index, int depth);
-word_t findEmptyFrame(word_t exclude, word_t *max_frame_index);
+void DFShelper(word_t frame, uint64_t parent, uint64_t curPage, int depth, DFSinfo *info);
+void DFS(DFSinfo * info);
+uint64_t cyclicDist(uint64_t a, uint64_t b);
 
 void VMinitialize() {
     for (int i = 0; i < PAGE_SIZE; ++i) {
@@ -24,9 +34,16 @@ int VMread(uint64_t virtualAddress, word_t* value) {
         PMread((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), &child_frame);
 
         // page is not in physical memory, check for empty frames
-        word_t max_frame_index;
+        word_t empty_frame = 0;
+        word_t max_frame_index = 0;
+        uint64_t pageToEvict = virtualAddress << OFFSET_WIDTH;
+        uint64_t frameToEvictFrom;
+        uint64_t locOfEvictFrame;
+        DFSinfo info = {parent_frame, virtualAddress, &empty_frame, &max_frame_index, &pageToEvict, &frameToEvictFrom, &locOfEvictFrame};
+
         if (child_frame == 0) {
-            child_frame = findEmptyFrame(parent_frame, &max_frame_index);
+            DFS(&info);
+            child_frame = empty_frame;
         }
 
         // no empty frames available, try using unused frame
@@ -36,56 +53,60 @@ int VMread(uint64_t virtualAddress, word_t* value) {
 
         // all frames are used and none are empty, we must evict a page.
         if (child_frame == 0) {
-            // TODO continue here
+            PMevict(*(info.frameToEvictFrom), *(info.pageToEvict));
+            PMwrite(locOfEvictFrame, 0);
+            child_frame = *(info.frameToEvictFrom);
         }
         PMwrite((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), child_frame);
         parent_frame = child_frame;
-        // @todo in theory, two addresses can be unified into the same variable?
     }
+        // todo continue here actually access address in page (perform restore if needed)
+
     PMread((child_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
 
     return 0;
 }
 
-/**
- * Recursive helper function for findEmptyFrame -- finds an empty frame below the given one in the VM tree,
- * if one exists.
- * @param frame The frame from which to start DFS
- * @param depth Level of the tree the starting frame is in
- * @param exclude Frame to exclude (not to be considered empty)
- * @param max_frame_index Output argument -- maximal index of a used frame.
- * @return Index of an empty frame, or 0 if none exist.
- */
-word_t findEmptyFrameBelow(word_t frame, uint64_t parent, word_t exclude, word_t *max_frame_index, unsigned int depth) {
 
-    if (depth == TABLES_DEPTH || frame == exclude) {
-        return 0;
+void DFShelper(word_t frame, uint64_t parent, uint64_t curPage, int depth, DFSinfo *info)
+{
+
+    if (depth == TABLES_DEPTH) {
+        if (cyclicDist(curPage, info->page_to_create) > *(info->pageToEvict)) {
+            *(info->frameToEvictFrom) = frame;
+            *(info->pageToEvict) = curPage;
+            *(info->locOfEvictFrame) = parent;
+        }
+        return;
     }
 
     word_t holder1 = 0;
-
+    // here is where the magic happens
     for (int i = 0; i < PAGE_SIZE; ++i) {
         word_t holder2;
         PMread((frame * PAGE_SIZE) + i, &holder2);
         if (holder2 > 0) {
-            if (holder2 > *max_frame_index) {*max_frame_index = holder2;}
-            word_t emptyFrame = findEmptyFrameBelow(holder2, (frame * PAGE_SIZE) + i, exclude, max_frame_index, depth + 1);
-            if (emptyFrame > 0) {
-                return emptyFrame;
+            // update max_frame_index
+            if (holder2 > *(info->max_frame_index)) {
+                *(info->max_frame_index) = holder2;
             }
+            // continue DFS looking for empty frame below
+            curPage = (curPage << OFFSET_WIDTH) + i;
+            DFShelper(holder2, (frame * PAGE_SIZE) + i, curPage, depth + 1, info);
         holder1 += holder2;
         }
     }
-    if (holder1 > 0) {
-        return 0;
+
+    if (holder1 == 0 and frame != info->exclude) {
+        // the frame given as an argument points to all zeroes -- remove it from its parent and save it.
+        PMwrite(parent, 0);
+        *(info->empty_frame) = frame;
     }
-    // the frame given as an argument points to all zeros -- remove it from its parent and return it.
-    PMwrite(parent, 0);
-    return frame;
 }
 
-word_t findEmptyFrame(word_t exclude, word_t *max_frame_index) {
-    return findEmptyFrameBelow(0, 0, exclude, max_frame_index, 0);
+void DFS(DFSinfo * info)
+{
+    return DFShelper(0, 0, 0, 0, info);
 }
 
 
@@ -102,6 +123,22 @@ int VMwrite(uint64_t virtualAddress, word_t value) {
 
     PMwrite((new_address * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
     return 0;
+}
+
+uint64_t cyclicDist(uint64_t a, uint64_t b) {
+    if (b < a) {
+        uint64_t temp = a;
+        a = b;
+        b = temp;
+    }
+
+    uint64_t distance = b - a;
+    if (NUM_PAGES - distance < distance) {
+        distance = NUM_PAGES - distance;
+    }
+
+    return distance;
+
 }
 
 int main() {

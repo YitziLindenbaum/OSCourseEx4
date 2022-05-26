@@ -2,7 +2,6 @@
 #include <vector>
 #include <unordered_map>
 #include <cassert>
-#include <cstdio>
 
 typedef std::vector<word_t> page_t;
 
