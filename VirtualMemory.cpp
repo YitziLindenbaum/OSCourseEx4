@@ -1,22 +1,36 @@
-#include <cstdio>
+/**
+ * AUTHORS: Yitzchak Lindenbaum and Elay Aharoni
+ * Implementation of Virtual Memory library.
+ * OS 2022 Spring Semester, Exercise 4
+ */
+
 #include "VirtualMemory.h"
 #include "PhysicalMemory.h"
 
+
 #define RIGHTMOST_BITS(num) (num & (PAGE_SIZE - 1))
 
+/**
+ * Struct to be passed in DFS function across all levels of reduction.
+ */
 struct DFSinfo {
     word_t exclude; // frame not to be considered empty even if it has only 0s
     uint64_t page_to_create;
     word_t *empty_frame;
-    word_t *max_frame_index; //
+    word_t *max_frame_index;
     uint64_t *pageToEvict; // VM page in PM with greatest cyclical difference from page_to_create
     uint64_t *frameToEvictFrom;
     uint64_t *locOfEvictFrame;
 } typedef DFSinfo;
 
+struct AddressException {};
+
 void DFShelper(word_t frame, uint64_t parent, uint64_t curPage, int depth, DFSinfo *info);
 void DFS(DFSinfo * info);
 uint64_t cyclicDist(uint64_t a, uint64_t b);
+word_t getFrameForAddress(uint64_t virtualAddress);
+
+// ========================= VM Library implementation =========================
 
 void VMinitialize() {
     for (int i = 0; i < PAGE_SIZE; ++i) {
@@ -24,64 +38,61 @@ void VMinitialize() {
     }
 }
 
-
 int VMread(uint64_t virtualAddress, word_t* value) {
-    word_t parent_frame = 0;
-    word_t child_frame;
-    unsigned int curBits;
-    for (int i = 0; i < TABLES_DEPTH; ++i) {
-        curBits = VIRTUAL_ADDRESS_WIDTH - ( (i + 1) * OFFSET_WIDTH);
-        PMread((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), &child_frame);
-
-        // page is not in physical memory, check for empty frames
-        word_t empty_frame = 0;
-        word_t max_frame_index = 0;
-        uint64_t pageToEvict = virtualAddress >> OFFSET_WIDTH;
-        uint64_t frameToEvictFrom;
-        uint64_t locOfEvictFrame;
-        uint64_t page_to_create = virtualAddress >> OFFSET_WIDTH;
-        DFSinfo info = {parent_frame, page_to_create, &empty_frame, &max_frame_index, &pageToEvict, &frameToEvictFrom, &locOfEvictFrame};
-
-        if (child_frame) {
-            parent_frame = child_frame;
-            continue;
-        }
-
-        DFS(&info);
-        child_frame = empty_frame;
-
-        // no empty frames available, try using unused frame
-        if (child_frame == 0 && max_frame_index + 1 < NUM_FRAMES) {
-            child_frame = max_frame_index + 1;
-        }
-
-        // all frames are used and none are empty, we must evict a page.
-        if (child_frame == 0) {
-            PMevict(*(info.frameToEvictFrom), *(info.pageToEvict));
-            for (int j = 0; j < PAGE_SIZE; ++j) {
-                PMwrite((*(info.frameToEvictFrom) * PAGE_SIZE) + j, 0);
-            }
-            PMwrite(locOfEvictFrame, 0);
-            child_frame = *(info.frameToEvictFrom);
-        }
-        PMwrite((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), child_frame);
-        parent_frame = child_frame;
+    word_t frame;
+    try {
+        frame = getFrameForAddress(virtualAddress);
+    }
+    catch (AddressException &e) {
+        return 0;
     }
 
     uint64_t page_to_restore = virtualAddress >> OFFSET_WIDTH;
-    PMrestore(child_frame, page_to_restore);
-    PMread((child_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
+    PMrestore(frame, page_to_restore);
+    PMread((frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
 
-    return 0;
+    return 1;
 }
 
 int VMwrite(uint64_t virtualAddress, word_t value) {
+    word_t frame;
+    try {
+        frame = getFrameForAddress(virtualAddress);
+    }
+    catch (AddressException &e) {
+        return 0;
+    }
+
+    uint64_t page_to_restore = virtualAddress >> OFFSET_WIDTH;
+    PMrestore(frame, page_to_restore);
+    PMwrite((frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
+
+    return 1;
+}
+
+// ============================ Helper functions ============================
+
+/**
+ * Finds the best frame for the given v. address according to algorithm
+ * @param virtualAddress
+ * @return proper frame
+ */
+word_t getFrameForAddress(uint64_t virtualAddress) {
+    if (virtualAddress >= VIRTUAL_MEMORY_SIZE) {
+        throw AddressException();
+    }
+
     word_t parent_frame = 0;
     word_t child_frame;
     unsigned int curBits;
     for (int i = 0; i < TABLES_DEPTH; ++i) {
         curBits = VIRTUAL_ADDRESS_WIDTH - ( (i + 1) * OFFSET_WIDTH);
         PMread((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), &child_frame);
+
+        if (child_frame) {
+            parent_frame = child_frame;
+            continue;
+        }
 
         // page is not in physical memory, check for empty frames
         word_t empty_frame = 0;
@@ -90,41 +101,41 @@ int VMwrite(uint64_t virtualAddress, word_t value) {
         uint64_t frameToEvictFrom;
         uint64_t locOfEvictFrame;
         uint64_t page_to_create = virtualAddress >> OFFSET_WIDTH;
-        DFSinfo info = {parent_frame, page_to_create, &empty_frame, &max_frame_index, &pageToEvict, &frameToEvictFrom, &locOfEvictFrame};
-
-        if (child_frame) {
-            parent_frame = child_frame;
-            continue;
-        }
+        DFSinfo info = {parent_frame, page_to_create, &empty_frame, &max_frame_index, &pageToEvict, &frameToEvictFrom,
+                        &locOfEvictFrame};
 
         DFS(&info);
         child_frame = empty_frame;
-
         // no empty frames available, try using unused frame
         if (child_frame == 0 && max_frame_index + 1 < NUM_FRAMES) {
             child_frame = max_frame_index + 1;
         }
-
         // all frames are used and none are empty, we must evict a page.
         if (child_frame == 0) {
             PMevict(*(info.frameToEvictFrom), *(info.pageToEvict));
+            // set the values in evicted page to 0
             for (int j = 0; j < PAGE_SIZE; ++j) {
                 PMwrite((*(info.frameToEvictFrom) * PAGE_SIZE) + j, 0);
             }
+            // remove reference to evicted frame from parent
             PMwrite(locOfEvictFrame, 0);
             child_frame = *(info.frameToEvictFrom);
         }
+
         PMwrite((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), child_frame);
         parent_frame = child_frame;
     }
-    uint64_t page_to_restore = virtualAddress >> OFFSET_WIDTH;
-    PMrestore(child_frame, page_to_restore);
-    PMwrite((child_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
-
-    return 0;
+    return child_frame;
 }
 
-
+/**
+ * Recursive helper for DFS function. Essentially performs DFS treating the given frame as the root.
+ * @param frame
+ * @param parent p. address of parent of frame (or 0 if frame is root)
+ * @param curPage when leaves of tree are reached, this variable will hold the VM page index
+ * @param depth depth in tree
+ * @param info
+ */
 void DFShelper(word_t frame, uint64_t parent, uint64_t curPage, int depth, DFSinfo *info)
 {
 
@@ -150,7 +161,7 @@ void DFShelper(word_t frame, uint64_t parent, uint64_t curPage, int depth, DFSin
             // continue DFS looking for empty frame below
             uint64_t nextPage = (curPage << OFFSET_WIDTH) + i;
             DFShelper(holder2, (frame * PAGE_SIZE) + i, nextPage, depth + 1, info);
-        holder1 += holder2;
+            holder1 += holder2;
         }
     }
 
@@ -161,14 +172,20 @@ void DFShelper(word_t frame, uint64_t parent, uint64_t curPage, int depth, DFSin
     }
 }
 
+/**
+ * Traverses virtual memory tree and updates input struct with relevant information.
+ */
 void DFS(DFSinfo * info)
 {
     DFShelper(0, 0, 0, 0, info);
 }
 
-
-
-
+/**
+ * Gives cyclic distance between two virtual pages.
+ * @param a
+ * @param b
+ * @return
+ */
 uint64_t cyclicDist(uint64_t a, uint64_t b) {
     if (b < a) {
         uint64_t temp = a;
@@ -182,14 +199,5 @@ uint64_t cyclicDist(uint64_t a, uint64_t b) {
     }
 
     return distance;
-
 }
 
-/*int main() {
-    VMinitialize();
-    VMwrite(37293038928, 67);
-    word_t holder;
-    VMread(37293038928, &holder);
-    printf("%d\n", holder);
-    return 0;
-}*/

@@ -1,0 +1,8 @@
+chucklind,elayaharoni
+Yitzchak Lindenbaum (336082789), Elay Aharoni (315533968)
+Exercise 4
+
+FILES:
+VirtualMemory.cpp -- implementation of MapReduceFramework library. Includes helper functions and structs as well.
+Makefile
+README -- this file.
