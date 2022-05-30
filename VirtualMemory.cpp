@@ -39,7 +39,8 @@ int VMread(uint64_t virtualAddress, word_t* value) {
         uint64_t pageToEvict = virtualAddress >> OFFSET_WIDTH;
         uint64_t frameToEvictFrom;
         uint64_t locOfEvictFrame;
-        DFSinfo info = {parent_frame, virtualAddress, &empty_frame, &max_frame_index, &pageToEvict, &frameToEvictFrom, &locOfEvictFrame};
+        uint64_t page_to_create = virtualAddress >> OFFSET_WIDTH;
+        DFSinfo info = {parent_frame, page_to_create, &empty_frame, &max_frame_index, &pageToEvict, &frameToEvictFrom, &locOfEvictFrame};
 
         if (child_frame) {
             parent_frame = child_frame;
@@ -67,7 +68,8 @@ int VMread(uint64_t virtualAddress, word_t* value) {
         parent_frame = child_frame;
     }
 
-    PMrestore(child_frame, virtualAddress);
+    uint64_t page_to_restore = virtualAddress >> OFFSET_WIDTH;
+    PMrestore(child_frame, page_to_restore);
     PMread((child_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
 
     return 0;
@@ -115,8 +117,8 @@ int VMwrite(uint64_t virtualAddress, word_t value) {
         PMwrite((parent_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress >> curBits), child_frame);
         parent_frame = child_frame;
     }
-
-    PMrestore(child_frame, virtualAddress);
+    uint64_t page_to_restore = virtualAddress >> OFFSET_WIDTH;
+    PMrestore(child_frame, page_to_restore);
     PMwrite((child_frame * PAGE_SIZE) + RIGHTMOST_BITS(virtualAddress), value);
 
     return 0;
